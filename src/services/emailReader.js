@@ -2,11 +2,11 @@ import Imap from "imap";
 import { simpleParser } from "mailparser";
 import dotenv from "dotenv";
 dotenv.config();
-import { parseAmazonOrder } from "./parsers/parseAmazonOrder.js";
+
 import { parseFlipkartOrder } from "./parsers/parseFlipkartOrder.js";
-import { parseMyntraOrder } from "./parsers/parseMyntraOrder.js";
 import { parseSwiggyOrder } from "./parsers/parseSwiggyOrder.js";
-import { parseBlinkitOrder } from "./parsers/parseBlinkitOrder.js";
+import { parseZomatoOrder } from "./parsers/parseZomatoOrder.js";
+import { parseDominosOrder } from "./parsers/parseDominosOrder.js";
 
 export const fetchRecentOrderEmails = () => {
   return new Promise((resolve, reject) => {
@@ -16,10 +16,13 @@ export const fetchRecentOrderEmails = () => {
       host: process.env.IMAP_HOST,
       port: process.env.IMAP_PORT,
       tls: true,
-      tlsOptions: { rejectUnauthorized: false }, // <--- Add this line
+      tlsOptions: { rejectUnauthorized: false },
     });
 
     const emails = [];
+    const limit = process.env.EMAIL_LIMIT
+      ? parseInt(process.env.EMAIL_LIMIT)
+      : 20;
 
     imap.once("ready", () => {
       imap.openBox("INBOX", false, () => {
@@ -28,8 +31,8 @@ export const fetchRecentOrderEmails = () => {
             imap.end();
             return resolve([]);
           }
-          // ✅ Limit to latest 20 emails
-          const recentEmails = results.slice(-20);
+
+          const recentEmails = results.slice(-limit);
           const fetch = imap.fetch(recentEmails, {
             bodies: "",
             markSeen: true,
@@ -40,40 +43,82 @@ export const fetchRecentOrderEmails = () => {
               simpleParser(stream, async (err, parsed) => {
                 const { from, subject, html, text } = parsed;
                 const content = html || text || "";
+                const lowerFrom = from.text.toLowerCase();
+                const lowerContent = content.toLowerCase();
 
-                let extracted;
+                const isSupported = [
+                  "flipkart",
+                  "swiggy",
+                  "zomato",
+                  "dominos",
+                ].some((keyword) => lowerFrom.includes(keyword));
 
-                if (from.text.includes("amazon")) {
-                  extracted = parseAmazonOrder(subject, content);
-                } else if (from.text.includes("flipkart")) {
-                  extracted = parseFlipkartOrder(subject, content, text);
-                } else if (from.text.includes("myntra")) {
-                  extracted = parseMyntraOrder(subject, content);
-                } else if (from.text.includes("swiggy")) {
-                  const order_date = new Date().toISOString().split("T")[0];
+                const isFlipkart = lowerFrom.includes("flipkart");
+                const isSwiggy = lowerFrom.includes("swiggy");
+                const isZomato = lowerFrom.includes("zomato");
+                const isDominos = lowerFrom.includes("dominos");
+
+                let hasOrderDetails = false;
+                if (isFlipkart) {
+                  hasOrderDetails =
+                    lowerContent.includes("order id") &&
+                    (lowerContent.includes("amount paid") ||
+                      lowerContent.includes("rs"));
+                } else if (isSwiggy) {
+                  hasOrderDetails =
+                    lowerContent.includes("order") &&
+                    (lowerContent.includes("total paid") ||
+                      lowerContent.includes("total") ||
+                      lowerContent.includes("amount"));
+                } else if (isDominos) {
+                  hasOrderDetails =
+                    lowerContent.includes("order") &&
+                    (lowerContent.includes("total") ||
+                      lowerContent.includes("amount") ||
+                      lowerContent.includes("rs"));
+                } else if (isZomato) {
+                  hasOrderDetails =
+                    lowerContent.includes("order") &&
+                    (lowerContent.includes("total") ||
+                      lowerContent.includes("amount") ||
+                      lowerContent.includes("rs"));
+                } else {
+                  hasOrderDetails = false;
+                }
+
+                if (!isSupported || !hasOrderDetails) return;
+
+                const order_date = new Date().toISOString().split("T")[0];
+                let extracted = null;
+
+                if (lowerFrom.includes("flipkart")) {
+                  extracted = parseFlipkartOrder({
+                    email_snippet: content,
+                    order_date,
+                  });
+                } else if (lowerFrom.includes("swiggy")) {
                   extracted = parseSwiggyOrder({
                     email_snippet: content,
                     order_date,
                   });
-                } else if (from.text.includes("blinkit")) {
-                  extracted = parseBlinkitOrder(subject, content, text);
-                } else {
-                  extracted = {
-                    order_id: "UNKNOWN-" + Date.now(),
-                    platform: "Unknown",
-                    order_date: new Date().toISOString().split("T")[0],
-                    items: [],
-                    total_amount: 0,
-                    payment_mode: "Unknown",
-                    tracking_id: "",
-                    delivery_status: "Pending",
-                    delivery_address: "Unknown",
-                    tracking_url: "",
+                } else if (lowerFrom.includes("zomato")) {
+                  extracted = parseZomatoOrder({
                     email_snippet: content,
-                  };
+                    order_date,
+                  });
+                } else if (lowerFrom.includes("dominos")) {
+                  extracted = parseDominosOrder({
+                    email_snippet: content,
+                    order_date,
+                  });
+                }
+                if (!extracted) {
+                  console.log(
+                    `[Parser Skipped] Reason: Missing data | From: ${from.text} | Subject: ${subject}`
+                  );
                 }
 
-                emails.push(extracted);
+                if (extracted) emails.push(extracted);
               });
             });
           });

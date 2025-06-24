@@ -18,36 +18,53 @@ function parseSwiggyOrder ({ email_snippet, order_date }) {
 
   // Order ID
   const orderText = $("td")
-    .filter((_, el) => $(el).text().includes("order id:"))
+    .filter((_, el) => $(el).text().toLowerCase().includes("order id:"))
     .text();
   const orderMatch = orderText.match(/order id:\s*(\d+)/i);
   if (orderMatch) result.order_id = orderMatch[1];
 
-  // Delivery Address
-  const addressLabel = $("td")
-    .filter((_, el) => $(el).text().trim() === "Deliver To:")
-    .parent();
-  const addressText = addressLabel
-    .next()
-    .find("td")
-    .text()
-    .trim();
-  if (addressText) result.delivery_address = addressText;
+  // Delivery Address (robust: finds the first non-empty <td> after "Deliver To:")
+  const deliverToTd = $("td").filter((_, el) => $(el).text().trim() === "Deliver To:");
+  if (deliverToTd.length) {
+    let address = "Unknown";
+    let tr = deliverToTd.closest("tr").next();
+    // Loop through next siblings until we find a non-empty <td>
+    while (tr.length) {
+      const text = tr.find("td").text().trim();
+      if (text) {
+        address = text;
+        break;
+      }
+      tr = tr.next();
+    }
+    result.delivery_address = address;
+  }
 
-  // Items
-  $("tr")
-    .has("td:contains('x ')")
-    .each((_, tr) => {
-      const itemText = $(tr).text().trim();
-      const match = itemText.match(/(\d+)\s*x\s*(.*?)₹?([\d,.]+)/);
-      if (match) {
+  // Items: Each item is in its own table, so select those tables
+  $("table").each((_, table) => {
+    const tds = $(table).find("tr").first().find("td");
+    if (tds.length === 2) {
+      const qtyName = $(tds[0]).text().trim();
+      const priceText = $(tds[1]).text().replace(/[^\d.]/g, "");
+      // Match "1 x Item Name"
+      const match = qtyName.match(/^(\d+)\s*x\s*(.+)$/);
+      if (match && priceText) {
         result.items.push({
           name: match[2].trim(),
           quantity: parseInt(match[1]),
-          price: parseFloat(match[3].replace(/,/g, "")),
+          price: parseFloat(priceText),
         });
       }
-    });
+    }
+  });
+
+  // Remove duplicate items (optional, in case of HTML quirks)
+  result.items = result.items.filter(
+    (item, idx, arr) =>
+      arr.findIndex(
+        (i) => i.name === item.name && i.price === item.price && i.quantity === item.quantity
+      ) === idx
+  );
 
   // Total Amount (Grand Total)
   $("td")
