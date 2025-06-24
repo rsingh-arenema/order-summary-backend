@@ -1,0 +1,88 @@
+openapi: 3.0.0
+info:
+  title: Orders API
+  description: API for managing and retrieving order summaries and details.
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000/
+paths:
+  /orders:
+    get:
+      summary: Get a list of all parsed order summaries
+      description: Retrieve a list of all parsed order summaries.
+      responses:
+        '200':
+          description: A list of order summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+  /orders/{order_id}:
+    get:
+      summary: Get detailed information of a specific order
+      description: Retrieve detailed information of a specific order by order_id.
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          description: The ID of the order to retrieve
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A detailed order object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+  /orders/sync:
+    post:
+      summary: Sync orders by fetching emails
+      description: Triggers email fetch and parses new order confirmation emails (mocked for now).
+      responses:
+        '200':
+          description: A message confirming the sync and count of newly synced orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Successfully synced orders."
+                  new_order_count:
+                    type: integer
+                    example: 5
+components:
+  schemas:
+    Order:
+      type: object
+      properties:
+        order_id:
+          type: string
+        platform:
+          type: string
+        order_date:
+          type: string
+          format: date
+        items:
+          type: array
+          items:
+            type: string
+        total_amount:
+          type: number
+          format: float
+        payment_mode:
+          type: string
+        tracking_id:
+          type: string
+        delivery_status:
+          type: string
+        delivery_address:
+          type: string
+        tracking_url:
+          type: string
+        email_snippet:
+          type: string
